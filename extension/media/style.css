@@ -119,6 +119,8 @@ html, body {
   stroke-width: 1.2; rx: 6;
 }
 .node.custom rect.body { stroke: #4a6a8a; }
+.node.ghost rect.body { stroke-dasharray: 6 4; opacity: 0.8; }
+.node.ghost .io { fill: #808080; }
 .node.selected rect.body { stroke: var(--accent); stroke-width: 2.2; }
 .node.active rect.body { stroke: var(--hot); stroke-width: 2.6; filter: url(#glow); }
 .node.match rect.body { stroke: #c586c0; stroke-width: 2; }

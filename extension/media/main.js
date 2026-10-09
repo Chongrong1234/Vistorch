@@ -18,6 +18,7 @@
     paused: null,            // paused message
     finished: null,
     error: null,
+    staticLoaded: false,
     selected: null,
     breakpoints: new Set(),
     viewSeq: null,           // null = follow live
@@ -248,6 +249,7 @@
       const g = el("g", { class: "node", "data-id": id, transform: `translate(${p.x},${p.y})` }, vp);
       let cls = "node";
       if (!node.builtin) cls += " custom";
+      if (node.predicted) cls += " ghost";
       if (id === S.selected) cls += " selected";
       if (id === activeId) cls += " active";
       if (filt) cls += id.toLowerCase().includes(filt) ? " match" : " dimmed";
@@ -265,7 +267,7 @@
         txt(g, 10, 59, "io" + (changed ? " changed" : ""), outStr);
         txt(g, 10, 72, "meta", `#${ev.seq}  ${ev.timeMs}ms` + (changed ? "  ⚠ shape changed" : ""));
       } else {
-        txt(g, 10, 46, "io", "(not executed yet)");
+        txt(g, 10, 46, "io", node.predicted ? "(预测 · 未执行)" : "(not executed yet)");
         if (node.numParams) txt(g, 10, 59, "meta", `params ${fmtNum(node.numParams)}`);
       }
       if (S.breakpoints.has(id)) {
@@ -301,6 +303,15 @@
       bar.appendChild(b);
       return b;
     };
+    if (S.staticLoaded && !S.hello && !S.finished) {
+      const run = document.createElement("button");
+      run.textContent = "🚀 Run ▶";
+      run.className = "primary";
+      run.title = "选择入口脚本，带着断点开始动态追踪";
+      run.onclick = () => vscode.postMessage({ type: "run" });
+      bar.appendChild(run);
+      bar.appendChild(sep());
+    }
     mk("▶ Continue", "run until next breakpoint", "continue", true);
     mk("↓ Step", "pause at the very next module call", "step");
     mk("⤼ Step Over", "next call at same or shallower depth", "step_over");
@@ -332,6 +343,8 @@
 
     if (S.paused) {
       setStatus(`⏸ paused at ${S.paused.nodeId}  (#${S.paused.seq}, ${S.paused.reason})`, true);
+    } else if (S.staticLoaded && !S.hello) {
+      setStatus(`静态预测图：${S.nodes.size} 节点 / ${S.edges.length} 边 — 双击打断点，然后 🚀 Run`);
     } else if (S.finished) {
       setStatus(`✔ finished — ${S.finished.totalCalls} module calls`);
     } else if (S.error) {
@@ -565,16 +578,46 @@
         S.hello = m;
         $("#hint").textContent =
           `${m.script}  ·  torch ${m.torch}${m.cuda ? " · CUDA" : " · CPU"} — 双击节点打断点，然后 Continue`;
+        // re-send breakpoints chosen on the static graph
+        if (S.breakpoints.size) {
+          vscode.postMessage({ type: "setBreakpoints", breakpoints: [...S.breakpoints] });
+        }
         break;
-      case "graph":
+      case "staticGraph": {
+        S.staticLoaded = true;
+        m.nodes.forEach((n) => { if (!S.nodes.has(n.id)) S.nodes.set(n.id, n); });
+        m.edges.forEach((ed) => {
+          const k = ed.from + "→" + ed.to;
+          if (!S.edgeSet.has(k)) { S.edgeSet.add(k); S.edges.push(ed); }
+        });
+        layoutDirty = true;
+        computeLayout();
+        fitView();
+        $("#hint").textContent =
+          `静态预测图（未执行代码）· 根类 ${m.rootClass} · ${m.classes} 个模块类` +
+          (m.error ? ` · ⚠ ${m.error}` : "") +
+          " — 虚线为预测节点，双击打断点，点 🚀 Run 开始验证";
+        break;
+      }
+      case "graph": {
         let added = false;
-        m.nodes.forEach((n) => { if (!S.nodes.has(n.id)) { S.nodes.set(n.id, n); added = true; } });
+        m.nodes.forEach((n) => {
+          const prev = S.nodes.get(n.id);
+          if (!prev) { S.nodes.set(n.id, n); added = true; }
+          else if (prev.predicted) {
+            // runtime confirmed a statically predicted node: light it up
+            Object.assign(prev, n, { predicted: false });
+          }
+        });
         m.edges.forEach((ed) => {
           const k = ed.from + "→" + ed.to;
           if (!S.edgeSet.has(k)) { S.edgeSet.add(k); S.edges.push(ed); added = true; }
         });
+        // re-layout only when the node/edge SET actually grew, so the
+        // static layout stays stable while nodes light up
         if (added) layoutDirty = true;
         break;
+      }
       case "call": {
         S.maxSeq = Math.max(S.maxSeq, m.seq);
         S.events.set(m.seq, m);
@@ -618,6 +661,6 @@
   });
 
   // ------------------------------------------------------------------ boot
-  $("#hint").textContent = "等待 tracer 连接…";
+  $("#hint").textContent = "等待 tracer / 静态图加载…";
   vscode.postMessage({ type: "ready" });
 })();

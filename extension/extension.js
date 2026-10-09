@@ -29,6 +29,9 @@ function activate(context) {
     vscode.commands.registerCommand("vistorch.traceCurrentFile", (uri) =>
       startTrace(context, uri)
     ),
+    vscode.commands.registerCommand("vistorch.analyzeProject", (uri) =>
+      analyzeProject(context, uri)
+    ),
     vscode.commands.registerCommand("vistorch.stopTrace", () =>
       session ? session.stop() : undefined
     ),
@@ -62,10 +65,86 @@ async function startTrace(context, uri) {
   session.start();
 }
 
+/**
+ * Static mode: analyze a project root with the bundled AST analyzer (no code
+ * executed), open the graph webview showing the PREDICTED network, let the
+ * user place breakpoints, then Run an entry script under the live tracer.
+ */
+async function analyzeProject(context, uri) {
+  let folder = uri && uri.fsPath;
+  if (!folder) {
+    const ws = vscode.workspace.workspaceFolders;
+    if (ws && ws.length === 1) {
+      folder = ws[0].uri.fsPath;
+    } else {
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFolders: true,
+        canSelectMany: false,
+        title: "选择要分析的工程根目录",
+      });
+      if (!picked || !picked.length) return;
+      folder = picked[0].fsPath;
+    }
+  }
+
+  const data = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification,
+      title: "Vistorch: 正在静态分析工程…" },
+    async () => runStaticAnalyzer(context, await resolvePython(), folder)
+  );
+  if (!data) return;
+  if (data.error) {
+    vscode.window.showWarningMessage(`Vistorch 静态分析: ${data.error}`);
+  }
+  output.appendLine(
+    `[vistorch] static: root=${folder} classes=${data.classes} ` +
+    `nodes=${data.nodes.length} edges=${data.edges.length} root=${data.rootClass}`
+  );
+
+  if (session) session.dispose();
+  session = new TraceSession(context, null, data);
+  session.start();
+}
+
+function runStaticAnalyzer(context, python, folder) {
+  return new Promise((resolve) => {
+    const bundled = path.join(context.extensionPath, "python");
+    const env = Object.assign({}, process.env, {
+      PYTHONPATH: process.env.PYTHONPATH
+        ? bundled + path.delimiter + process.env.PYTHONPATH
+        : bundled,
+    });
+    const child = spawn(python, ["-m", "vistorch.static", folder], { env });
+    let out = "", err = "";
+    child.stdout.on("data", (d) => (out += d.toString()));
+    child.stderr.on("data", (d) => (err += d.toString()));
+    child.on("error", (e) => {
+      vscode.window.showErrorMessage(
+        `Vistorch: 无法启动 python "${python}": ${e.message}`);
+      resolve(null);
+    });
+    child.on("exit", (code) => {
+      if (code !== 0) {
+        output.appendLine(`[vistorch] static analyzer failed: ${err}`);
+        vscode.window.showErrorMessage("Vistorch 静态分析失败，详见输出面板");
+        resolve(null);
+        return;
+      }
+      try {
+        resolve(JSON.parse(out.trim().split("\n").pop()));
+      } catch {
+        output.appendLine(`[vistorch] bad analyzer output: ${out.slice(0, 500)}`);
+        resolve(null);
+      }
+    });
+  });
+}
+
 class TraceSession {
-  constructor(context, script) {
+  constructor(context, script, staticData) {
     this.context = context;
-    this.script = script;
+    this.script = script || null;
+    this.staticData = staticData || null;
     this.server = null;
     this.socket = null;
     this.child = null;
@@ -86,7 +165,9 @@ class TraceSession {
     const media = vscode.Uri.file(path.join(extPath, "media"));
     this.panel = vscode.window.createWebviewPanel(
       "vistorchGraph",
-      `Vistorch: ${path.basename(this.script)}`,
+      this.script
+        ? `Vistorch: ${path.basename(this.script)}`
+        : `Vistorch: ${this.staticData.rootClass} (静态图)`,
       vscode.ViewColumn.Beside,
       {
         enableScripts: true,
@@ -115,8 +196,16 @@ class TraceSession {
       case "ready":
         if (!this.webviewReady) {
           this.webviewReady = true;
-          this.launchTracer();
+          if (this.staticData) {
+            this.post(Object.assign({ type: "staticGraph" }, this.staticData));
+          }
+          if (this.script) {
+            this.launchTracer();
+          }
         }
+        break;
+      case "run":
+        this.pickEntryAndRun();
         break;
       case "resume":
         this.sendCmd({ cmd: "resume", mode: msg.mode });
@@ -146,6 +235,38 @@ class TraceSession {
       return;
     }
     this.panel.webview.postMessage(msg);
+  }
+
+  /** Static mode: let the user pick an entry script, then start the tracer. */
+  async pickEntryAndRun() {
+    if (this.child) return; // already running
+    const entries = (this.staticData && this.staticData.entries) || [];
+    let file = null;
+    const items = entries.map((e) => ({
+      label: `$(play) ${e.className}`,
+      description: `${path.basename(e.script)}:${e.line}`,
+      detail: e.script,
+      script: e.script,
+    }));
+    items.push({ label: "$(file) 手动选择脚本…", script: null });
+    const picked = await vscode.window.showQuickPick(items, {
+      title: "选择入口脚本开始断点调试",
+    });
+    if (!picked) return;
+    if (picked.script) {
+      file = picked.script;
+    } else {
+      const dlg = await vscode.window.showOpenDialog({
+        filters: { Python: ["py"] },
+        canSelectMany: false,
+        title: "选择入口脚本",
+      });
+      if (!dlg || !dlg.length) return;
+      file = dlg[0].fsPath;
+    }
+    this.script = file;
+    if (this.panel) this.panel.title = `Vistorch: ${path.basename(file)}`;
+    this.launchTracer();
   }
 
   // ------------------------------------------------------------------ tracer
@@ -272,8 +393,9 @@ class TraceSession {
 
   restart() {
     const script = this.script;
+    const staticData = this.staticData;
     this.dispose();
-    session = new TraceSession(this.context, script);
+    session = new TraceSession(this.context, script, staticData);
     session.start();
   }
 

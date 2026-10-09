@@ -7,6 +7,14 @@
 
 ## 功能
 
+- 🗂️ **静态全工程分析（先建大图）**：给一个根目录，纯 AST 解析所有
+  `nn.Module` 子类的 `__init__`（含 `nn.Sequential` 容器展开）和 `forward`
+  调用顺序，**不运行任何代码**就展开出预测网络大图（虚线节点）；
+  静态节点 id 与运行时 id 使用同一套属性路径命名（`Net.body.0.conv`），
+  所以在静态图上打的断点运行时会精确命中
+- ✅ **断点验证中间结果**：在静态大图上双击关键层打断点 → 点 🚀 Run 选择
+  入口脚本 → 程序跑到断点暂停，逐层核对 shape / mean±std / min/max，
+  已执行节点由虚线变为实线点亮，预测与实测一一对应
 - 🔀 **实时网络流图**：运行脚本时动态构建，边来自真实的张量流向
   （按输出张量身份追踪生产者 → 消费者，残差连接也能正确连线）
 - 🐞 **调试器式步进**：Continue / Step / Step Over / Step Out / Restart / Stop，
@@ -50,12 +58,29 @@
    （或编辑器右上角的运行按钮 / 右键菜单）
 6. 右侧弹出流图：先按 `▶ Continue` 跑到断点，或 `↓ Step` 逐层走
 
+### 静态分析 + 断点验证（推荐工作流）
+
+1. 在资源管理器里右键工程根目录 → **`Vistorch: Analyze Project && Open Flow Graph`**
+   （或在命令面板执行，单目录工作区默认分析整个工作区）
+2. 几秒内出现**预测网络大图**（虚线节点 = 静态预测，未执行任何代码）
+3. 双击你要验证的中间层（比如某个 encoder 输出）打断点 🔴
+4. 点工具栏 **🚀 Run ▶**，从检测到的入口点（`if __name__ == "__main__"`
+   里实例化模型的脚本）中选择一个开始运行
+5. 程序跑到断点处暂停，节点点亮为实线；侧栏查看该层输入/输出的
+   shape 与统计量，核对无误后 `▶ Continue` 到下一个断点
+
+静态分析器也可以命令行单独用（纯标准库，不需要 torch）：
+
+```bash
+PYTHONPATH=extension/python python3 -m vistorch.static /path/to/project [--root-class Net]
+```
+
 ### 打包安装
 
 ```bash
 npm i -g @vscode/vsce
-cd extension && vsce package        # 生成 vistorch-0.1.0.vsix
-code --install-extension vistorch-0.1.0.vsix
+cd extension && vsce package        # 生成 vistorch-0.2.0.vsix
+code --install-extension vistorch-0.2.0.vsix
 ```
 
 ### 配置项（Settings）
@@ -92,6 +117,9 @@ io 摘要）/ `paused`（阻塞等待恢复）/ `stdout` / `error` / `finished`
 # 协议冒烟测试（步进/断点/源码定位/张量摘要，需一个有 torch 的 python）
 node test/mock_client.js /path/to/python examples/demo_cnn.py
 
+# 静态分析 + 静态/运行时节点 id 一致性（断点映射正确性的保证）
+node test/static_check.js /path/to/python
+
 # 跑通真实模型 GS-MTRNet（约 140 个节点、130 条边）
 node test/run_to_end.js /path/to/python examples/demo_gsmtrnet.py
 ```
@@ -100,6 +128,9 @@ node test/run_to_end.js /path/to/python examples/demo_gsmtrnet.py
 
 - 边按「张量对象身份」推断：纯函数式算子（`torch.add`、`F.relu`）不产生节点，
   但其两端模块间的连线仍然正确；计划中：可选 Hook `torch.nn.functional` 常用算子
+- 静态分析覆盖常见写法（`self.x = Layer(...)`、`nn.Sequential/ModuleList`、
+  `forward` 中 `self.x(...)` 调用）；动态构建的子模块（如循环里 append 到
+  普通 list、条件分支创建层）静态图预测不到，运行时仍会实时补画
 - `torch.compile` / JIT trace 的模型暂不生效（绕过 `__call__`）
 - DataLoader worker 子进程自动跳过（不会重复上报）
 - 计划中：反向传播梯度范数列、张量直方图、导出 trace 为文件分享

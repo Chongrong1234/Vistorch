@@ -2,7 +2,7 @@
   "name": "vistorch",
   "displayName": "Vistorch — PyTorch Tensor Flow Debugger",
   "description": "Live tensor-flow debugger for PyTorch: watch your network's data flow graph build up, pause at any layer like a debugger, inspect tensor shapes/statistics, and jump straight to the code.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "vistorch",
   "license": "MIT",
   "engines": {
@@ -29,6 +29,11 @@
         "command": "vistorch.traceCurrentFile",
         "title": "Vistorch: Trace Current Python File",
         "icon": "$(debug-alt)"
+      },
+      {
+        "command": "vistorch.analyzeProject",
+        "title": "Vistorch: Analyze Project && Open Flow Graph",
+        "icon": "$(type-hierarchy)"
       },
       {
         "command": "vistorch.stopTrace",
@@ -60,6 +65,11 @@
         {
           "command": "vistorch.traceCurrentFile",
           "when": "resourceLangId == python",
+          "group": "9_vistorch"
+        },
+        {
+          "command": "vistorch.analyzeProject",
+          "when": "explorerResourceIsFolder",
           "group": "9_vistorch"
         }
       ]
