@@ -1,0 +1,98 @@
+{
+  "name": "vistorch",
+  "displayName": "Vistorch — PyTorch Tensor Flow Debugger",
+  "description": "Live tensor-flow debugger for PyTorch: watch your network's data flow graph build up, pause at any layer like a debugger, inspect tensor shapes/statistics, and jump straight to the code.",
+  "version": "0.1.0",
+  "publisher": "vistorch",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Debuggers",
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "pytorch",
+    "tensor",
+    "debug",
+    "deep-learning",
+    "visualization",
+    "shape"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "vistorch.traceCurrentFile",
+        "title": "Vistorch: Trace Current Python File",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "vistorch.stopTrace",
+        "title": "Vistorch: Stop Trace",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "vistorch.restartTrace",
+        "title": "Vistorch: Restart Trace",
+        "icon": "$(debug-restart)"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "vistorch.traceCurrentFile",
+          "when": "resourceLangId == python",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "vistorch.traceCurrentFile",
+          "when": "resourceLangId == python",
+          "group": "9_vistorch"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "vistorch.traceCurrentFile",
+          "when": "resourceLangId == python",
+          "group": "9_vistorch"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Vistorch",
+      "properties": {
+        "vistorch.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python interpreter with PyTorch installed. Empty = auto-detect (python.defaultInterpreterPath, then python3/python on PATH)."
+        },
+        "vistorch.scriptArgs": {
+          "type": "string",
+          "default": "",
+          "description": "Extra arguments passed to the traced script (space separated)."
+        },
+        "vistorch.stats": {
+          "type": "boolean",
+          "default": true,
+          "description": "Collect tensor statistics (mean/std/min/max). Disable for very large tensors/models."
+        },
+        "vistorch.maxCalls": {
+          "type": "number",
+          "default": 0,
+          "description": "Automatically stop tracing after N module calls (0 = unlimited)."
+        },
+        "vistorch.pauseOnEntry": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pause at the first module call so you can step through the whole forward pass."
+        }
+      }
+    }
+  }
+}

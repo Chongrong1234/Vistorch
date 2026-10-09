@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vistorch"
+version = "0.1.0"
+description = "Live tensor-flow tracer for PyTorch (pairs with the Vistorch VSCode extension)"
+readme = { text = "See https://github.com/Chongrong1234/Vistorch", content-type = "text/plain" }
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = ["torch>=1.13"]
+
+[tool.setuptools]
+packages = ["vistorch"]
